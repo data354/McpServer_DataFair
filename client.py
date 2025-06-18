@@ -143,36 +143,77 @@ def export_to_markdown(messages):
     return markdown_content
 
 
-def format_response_with_markdown(response):
-    """Formate la réponse avec un meilleur rendu Markdown"""
-    # Détecter et formater les tableaux
-    if "|" in response and response.count("|") >= 6:  # Probable tableau
-        lines = response.split("\n")
-        formatted_lines = []
-
-        for line in lines:
-            if "|" in line and line.count("|") >= 2:
-                formatted_lines.append(line)
-            else:
-                formatted_lines.append(line)
-
-        response = "\n".join(formatted_lines)
-
-    # Améliorer les listes
+def simple_table_formatter(response):
+    """Version simplifiée pour formater les tableaux"""
     lines = response.split("\n")
     formatted_lines = []
+    i = 0
 
-    for line in lines:
-        if line.strip().startswith("- "):
-            formatted_lines.append(line)
-        elif line.strip().startswith("* "):
-            formatted_lines.append(line.replace("* ", "- "))
-        elif any(line.strip().startswith(f"{i}. ") for i in range(1, 20)):
-            formatted_lines.append(line)
+    while i < len(lines):
+        line = lines[i]
+
+        # Détecter le début d'un tableau
+        if "|" in line and line.count("|") >= 3:
+            table_lines = [line]
+            i += 1
+
+            # Collecter toutes les lignes du tableau
+            while i < len(lines) and ("|" in lines[i] or lines[i].strip() == ""):
+                if "|" in lines[i]:
+                    table_lines.append(lines[i])
+                i += 1
+
+            # Convertir en HTML si c'est vraiment un tableau
+            if len(table_lines) >= 2:
+                html_table = convert_markdown_table_to_html(table_lines)
+                formatted_lines.append(html_table)
+            else:
+                formatted_lines.extend(table_lines)
+
+            i -= 1  # Ajuster l'index
         else:
             formatted_lines.append(line)
 
+        i += 1
+
     return "\n".join(formatted_lines)
+
+
+def convert_markdown_table_to_html(table_lines):
+    """Convertit un tableau markdown en HTML"""
+    # Nettoyer les lignes
+    clean_lines = []
+    for line in table_lines:
+        if line.strip() and not (line.count("-") > line.count("|") and "|" in line):
+            clean_lines.append(line)
+
+    if len(clean_lines) < 2:
+        return "\n".join(table_lines)
+
+    html = '<table style="border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 14px;">'
+
+    # En-tête
+    header_cells = [cell.strip() for cell in clean_lines[0].split("|") if cell.strip()]
+    if header_cells:
+        html += '<thead><tr style="background-color: #f8f9fa;">'
+        for cell in header_cells:
+            html += f'<th style="border: 1px solid #dee2e6; padding: 8px; text-align: left; font-weight: 600;">{cell}</th>'
+        html += "</tr></thead>"
+
+    # Corps
+    html += "<tbody>"
+    for line in clean_lines[1:]:
+        cells = [cell.strip() for cell in line.split("|") if cell.strip()]
+        if cells and len(cells) == len(header_cells):
+            html += "<tr>"
+            for cell in cells:
+                html += (
+                    f'<td style="border: 1px solid #dee2e6; padding: 8px;">{cell}</td>'
+                )
+            html += "</tr>"
+
+    html += "</tbody></table>"
+    return html
 
 
 def create_chart_from_data(data_text):
@@ -393,7 +434,6 @@ with st.sidebar:
     L'agent peut vous aider à:
     - Trouver des jeux de données
     - Expliquer des indicateurs
-    - Générer des visualisations
     """
     )
     st.markdown("---")
@@ -506,7 +546,7 @@ if st.session_state.get("generate_summary", False):
 # Afficher l'historique des messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        formatted_content = format_response_with_markdown(message["content"])
+        formatted_content = simple_table_formatter(message["content"])
         st.markdown(formatted_content, unsafe_allow_html=True)
 
         if message["role"] == "assistant":
@@ -532,7 +572,7 @@ if prompt := st.chat_input("Posez votre question ici..."):
                 response = loop.run_until_complete(
                     run_agent_with_memory(st.session_state.messages)
                 )
-                response = format_response_with_markdown(response)
+                response = simple_table_formatter(response)
 
                 for chunk in response.split():
                     full_response += chunk + " "
