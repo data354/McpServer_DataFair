@@ -511,15 +511,6 @@ async def run_agent_with_memory(messages):
     **RÈGLES CRITIQUES POUR LES TABLEAUX :**
     Lorsque tu dois présenter des listes d'outils, de datasets, de fichiers, ou toute autre information qui peut être organisée en colonnes, tu **DOIS TOUJOURS** utiliser le format de tableau Markdown STRICT.
 
-    **FORMAT OBLIGATOIRE POUR LES TABLEAUX :**
-    ```
-    | Nom de l'outil | Description |
-    |---|---|
-    | lister_datasets_disponibles | Liste tous les datasets disponibles sur le serveur. |
-    | lister_fichiers | Permet de lister les fichiers d'un dataset spécifique. |
-    | obtenir_values_agg | Récupère des informations agrégées basées sur les valeurs d'une colonne. |
-    ```
-
     **POINTS ESSENTIELS À RESPECTER IMPÉRATIVEMENT :**
     1.  **Réponse Complète et Délimitée :** Si la réponse contient un tableau, le tableau DOIT être la partie principale et claire de la réponse. Place le texte introductif (ex: "Voici la liste des outils disponibles :") AVANT le bloc du tableau, et assure-toi qu'il y a un double saut de ligne (`\\n\\n`) entre le texte et le début du tableau.
     2.  **Bloc de tableau autonome :** Le tableau Markdown doit être un bloc de texte propre et autonome. NE JAMAIS entrelacer des phrases, des mots ou des caractères supplémentaires entre les lignes du tableau lui-même.
@@ -723,7 +714,7 @@ def initialize_agent():
             }
         )
         tools = await client.get_tools()
-        return create_react_agent("openai:gpt-4o-mini", tools)
+        return create_react_agent("openai:gpt-4o", tools)
 
     return loop.run_until_complete(_initialize())
 
