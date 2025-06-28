@@ -6,6 +6,7 @@ from typing import Dict, List, Any, Optional
 import httpx
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 
 load_dotenv(dotenv_path=".env")
@@ -700,4 +701,12 @@ async def get_dataset_simple_metrics_agg(
 # Main entry point
 if __name__ == "__main__":
     print("Starting MCP server...", file=sys.stderr)
-    mcp.run(transport="streamable-http")
+    
+    port = int(os.environ.get("PORT", 8000))
+
+    mcp.run(
+        transport="streamable-http",
+        host="0.0.0.0",    # Pour Cloud Run
+        port=port,
+        path="/mcp"        # Chemin par défaut
+    )

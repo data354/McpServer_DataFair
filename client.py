@@ -708,7 +708,7 @@ def initialize_agent():
         client = MultiServerMCPClient(
             {
                 "local_mcp": {
-                    "url": "http://127.0.0.1:8000/mcp",
+                    "url": "https://mcp-server-626474317752.europe-west1.run.app/mcp/",
                     "transport": "streamable_http",
                 }
             }
