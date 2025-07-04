@@ -17,8 +17,7 @@ DATASET_URL = os.getenv("DATASET_URL")
 DATASET_KOUMOUL_URL = os.getenv("DATASET_KOUMOUL_URL")
 API_BASE_URL_TEMPLATE = "{DATASET_URL}/{dataset_id}"
 API_BASE_URL_TEMPLATE_KOUMOUL = "{DATASET_KOUMOUL_URL}/{dataset_id}"
-# API_KEY = os.getenv("API_KEY")
-API_KEY = "bzpIQWJZUF8teEM6MmdxbmlyYVI5T3c4U2VxZGZwNjhU"
+API_KEY = os.getenv("API_KEY")
 
 # Add a cache for dataset details
 DATASET_DETAILS_CACHE = {}
@@ -34,7 +33,7 @@ DATASETS_INITIALIZED = False
 mcp = FastMCP("multi-datasets-server")
 
 
-async def get_http_client() -> httpx.AsyncClient:
+async def get_http_client() -> httpx.AsyncClient(timeout=30.0):
     """
     Create and return a configured HTTP client for API requests.
 
@@ -50,7 +49,7 @@ async def get_http_client() -> httpx.AsyncClient:
     )
 
 
-async def get_http_client_koumoul() -> httpx.AsyncClient:
+async def get_http_client_koumoul() -> httpx.AsyncClient(timeout=60.0):
     """
     Create and return a configured HTTP client for API requests.
 
@@ -68,7 +67,7 @@ async def get_http_client_koumoul() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         cookies=cookies,  # Authentication via cookies instead of x-apikey header
         headers=headers,
-        timeout=30.0,
+        timeout=60.0,
     )
 
 
