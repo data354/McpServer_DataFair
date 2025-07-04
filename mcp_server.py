@@ -6,19 +6,25 @@ from typing import Dict, List, Any, Optional
 import httpx
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
-from fastmcp import FastMCP
+
+# from fastmcp import FastMCP
 
 
 load_dotenv(dotenv_path=".env")
 
 # Configuration constants
 DATASET_URL = os.getenv("DATASET_URL")
+DATASET_KOUMOUL_URL = os.getenv("DATASET_KOUMOUL_URL")
 API_BASE_URL_TEMPLATE = "{DATASET_URL}/{dataset_id}"
-API_KEY = os.getenv("API_KEY")
+API_BASE_URL_TEMPLATE_KOUMOUL = "{DATASET_KOUMOUL_URL}/{dataset_id}"
+# API_KEY = os.getenv("API_KEY")
+API_KEY = "bzpIQWJZUF8teEM6MmdxbmlyYVI5T3c4U2VxZGZwNjhU"
+
 # Add a cache for dataset details
 DATASET_DETAILS_CACHE = {}
 # Global cache for dataset management
 AVAILABLE_DATASETS = {}  # Dictionary to store available datasets {name: id}
+AVAILABLE_DATASETS_KOUMOUL = {}  # Dictionary to store available datasets {name: id}
 LAST_DATASETS_UPDATE = 0
 DATASETS_CACHE_DURATION = 300  # Cache duration in seconds (5 minutes)
 DATASETS_INITIALIZED = False
@@ -44,6 +50,28 @@ async def get_http_client() -> httpx.AsyncClient:
     )
 
 
+async def get_http_client_koumoul() -> httpx.AsyncClient:
+    """
+    Create and return a configured HTTP client for API requests.
+
+    Returns:
+        httpx.AsyncClient: Configured HTTP client with cookies and timeout
+    """
+    # Use cookies for authentication instead of headers
+    cookies = {"id_token": API_KEY}
+
+    # Basic headers without authentication
+    headers = {
+        "Content-Type": "application/json",
+    }
+
+    return httpx.AsyncClient(
+        cookies=cookies,  # Authentication via cookies instead of x-apikey header
+        headers=headers,
+        timeout=30.0,
+    )
+
+
 async def fetch_available_datasets() -> Dict[str, str]:
     """
     Fetch all available datasets from the API dynamically with intelligent pagination.
@@ -61,7 +89,9 @@ async def fetch_available_datasets() -> Dict[str, str]:
             initial_size = 500  # Large enough for most cases
 
             print("Fetching datasets...", file=sys.stderr)
-            response = await client.get(DATASET_URL, params={"size": initial_size})
+            response = await client.get(
+                DATASET_URL, params={"size": initial_size}, timeout=30.0
+            )
             response.raise_for_status()
             data = response.json()
 
@@ -77,7 +107,78 @@ async def fetch_available_datasets() -> Dict[str, str]:
                     file=sys.stderr,
                 )
                 # Make a second request with the exact size
-                response = await client.get(DATASET_URL, params={"size": total_count})
+                response = await client.get(
+                    DATASET_URL, params={"size": total_count}, timeout=45.0
+                )
+                response.raise_for_status()
+                data = response.json()
+                results = data.get("results", [])
+
+            # Build dictionary mapping dataset names to IDs
+            datasets = {}
+            for dataset in results:
+                try:
+                    datasets[dataset["title"]] = dataset["id"]
+                except KeyError:
+                    print(f"Skipping malformed dataset: {dataset}", file=sys.stderr)
+
+            print(
+                f"Successfully fetched {len(datasets)}/{total_count} datasets",
+                file=sys.stderr,
+            )
+
+            # Consistency check
+            if len(datasets) != total_count:
+                print(
+                    f"Warning: Expected {total_count} datasets but got {len(datasets)}",
+                    file=sys.stderr,
+                )
+
+            return datasets
+
+    except Exception as e:
+        print(f"Failed to fetch datasets: {str(e)}", file=sys.stderr)
+        raise RuntimeError(f"Failed to fetch datasets: {str(e)}")
+
+
+async def fetch_available_datasets_koumoul() -> Dict[str, str]:
+    """
+    Fetch all available datasets from the API dynamically with intelligent pagination.
+
+    Returns:
+        Dict[str, str]: Dictionary mapping dataset titles to their IDs
+
+    Raises:
+        RuntimeError: If the API request fails
+    """
+    try:
+        client = await get_http_client_koumoul()
+        async with client:
+            # Start with a reasonable size for the first request
+            initial_size = 500  # Large enough for most cases
+
+            print("Fetching datasets...", file=sys.stderr)
+            response = await client.get(
+                DATASET_KOUMOUL_URL, params={"size": initial_size}
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            total_count = data.get("count", 0)
+            results = data.get("results", [])
+
+            print(f"Found {total_count} total datasets", file=sys.stderr)
+
+            # If we didn't retrieve everything with the first request
+            if len(results) < total_count:
+                print(
+                    f"Need to fetch remaining datasets ({len(results)}/{total_count} retrieved)",
+                    file=sys.stderr,
+                )
+                # Make a second request with the exact size
+                response = await client.get(
+                    DATASET_KOUMOUL_URL, params={"size": total_count}
+                )
                 response.raise_for_status()
                 data = response.json()
                 results = data.get("results", [])
@@ -133,6 +234,37 @@ def get_dataset_url(dataset_name: str) -> str:
     return API_BASE_URL_TEMPLATE.format(dataset_id=dataset_id, DATASET_URL=DATASET_URL)
 
 
+def get_dataset_url_koumoul(dataset_name: str) -> str:
+    """
+    Construct the base URL for a specific dataset.
+
+    Args:
+        dataset_name (str): Name of the dataset
+
+    Returns:
+        str: Complete API URL for the dataset
+
+    Raises:
+        RuntimeError: If datasets are not initialized
+        ValueError: If dataset name is not found
+    """
+    if not AVAILABLE_DATASETS_KOUMOUL:
+        raise RuntimeError(
+            "Dataset list not initialized. Call fetch_available_datasets first."
+        )
+
+    if dataset_name not in AVAILABLE_DATASETS_KOUMOUL:
+        available_names = list(AVAILABLE_DATASETS_KOUMOUL.keys())
+        raise ValueError(
+            f"Dataset '{dataset_name}' not found. Available datasets: {available_names[:10]}..."
+        )
+
+    dataset_id = AVAILABLE_DATASETS_KOUMOUL[dataset_name]
+    return API_BASE_URL_TEMPLATE_KOUMOUL.format(
+        dataset_id=dataset_id, DATASET_KOUMOUL_URL=DATASET_KOUMOUL_URL
+    )
+
+
 async def get_dataset_details(dataset_id: str) -> Dict[str, Any]:
     """Fetch dataset details with caching"""
     # Check the cache first
@@ -148,6 +280,26 @@ async def get_dataset_details(dataset_id: str) -> Dict[str, Any]:
 
             # Cache for future requests
             DATASET_DETAILS_CACHE[dataset_id] = details
+            return details
+    except Exception:
+        return {}
+
+
+async def get_dataset_details_koumoul(dataset_id: str) -> Dict[str, Any]:
+    """Fetch dataset details with caching"""
+    # Check the cache first
+    if dataset_id in DATASET_DETAILS_CACHE_KOUMOUL:
+        return DATASET_DETAILS_CACHE_KOUMOUL[dataset_id]
+
+    try:
+        client = await get_http_client_koumoul()
+        async with client:
+            response = await client.get(f"{DATASET_KOUMOUL_URL}/{dataset_id}")
+            response.raise_for_status()
+            details = response.json()
+
+            # Cache for future requests
+            DATASET_DETAILS_CACHE_KOUMOUL[dataset_id] = details
             return details
     except Exception:
         return {}
@@ -204,6 +356,64 @@ async def initialize_datasets():
             print(f"Error refreshing datasets: {e}", file=sys.stderr)
             # Keep existing cache if refresh fails, but raise if no cache exists
             if not AVAILABLE_DATASETS:
+                raise
+
+
+async def initialize_datasets_koumoul():
+    """
+    Initialize or refresh the datasets cache if needed.
+
+    Updates the global AVAILABLE_DATASETS dictionary and tracks changes.
+    Cache is refreshed if empty or expired based on DATASETS_CACHE_DURATION.
+
+    Raises:
+        Exception: If initial dataset loading fails
+    """
+    global AVAILABLE_DATASETS_KOUMOUL, LAST_DATASETS_UPDATE, DATASETS_INITIALIZED_KOUMOUL
+
+    current_time = time.time()
+    cache_expired = (current_time - LAST_DATASETS_UPDATE) > DATASETS_CACHE_DURATION
+
+    # Reload datasets if cache is empty or expired
+    if not AVAILABLE_DATASETS_KOUMOUL or cache_expired:
+        try:
+            print("Refreshing datasets cache...", file=sys.stderr)
+            new_datasets = await fetch_available_datasets_koumoul()
+
+            # Check for changes and log them
+            if new_datasets != AVAILABLE_DATASETS:
+                print(
+                    f"Datasets updated: {len(new_datasets)} total datasets",
+                    file=sys.stderr,
+                )
+
+                if AVAILABLE_DATASETS_KOUMOUL:  # Not the first load
+                    added = set(new_datasets.keys()) - set(
+                        AVAILABLE_DATASETS_KOUMOUL.keys()
+                    )
+                    removed = set(AVAILABLE_DATASETS_KOUMOUL.keys()) - set(
+                        new_datasets.keys()
+                    )
+
+                    if added:
+                        print(
+                            f"New datasets: {', '.join(list(added)[:5])}...",
+                            file=sys.stderr,
+                        )
+                    if removed:
+                        print(
+                            f"Removed datasets: {', '.join(list(removed)[:5])}...",
+                            file=sys.stderr,
+                        )
+
+            AVAILABLE_DATASETS_KOUMOUL = new_datasets
+            LAST_DATASETS_UPDATE = current_time
+            DATASETS_INITIALIZED_KOUMOUL = True
+
+        except Exception as e:
+            print(f"Error refreshing datasets: {e}", file=sys.stderr)
+            # Keep existing cache if refresh fails, but raise if no cache exists
+            if not AVAILABLE_DATASETS_KOUMOUL:
                 raise
 
 
@@ -698,15 +908,110 @@ async def get_dataset_simple_metrics_agg(
         return {"error": f"Failed to compute simple metrics aggregation: {str(e)}"}
 
 
+@mcp.tool()
+async def create_dataset_row(
+    dataset_name: str, row_data: Dict[str, Any], validate: bool = True
+) -> Dict[str, Any]:
+    """
+    Create a new row in the specified dataset using the /lines endpoint.
+
+    Args:
+        dataset_name: Name of the target dataset
+        row_data: Dictionary containing the row data to insert
+        validate: Whether to validate the data before insertion (default: True)
+
+    Returns:
+        Dictionary with operation result:
+        {
+            "success": boolean,
+            "data": created row data or None,
+            "error": error message or None
+        }
+    """
+    try:
+        await initialize_datasets_koumoul()
+
+        # Construct the correct endpoint URL
+        dataset_id = AVAILABLE_DATASETS_KOUMOUL[dataset_name]
+        url = f"{DATASET_KOUMOUL_URL}/{dataset_id}/lines"
+
+        print(f"Creating row in dataset: {dataset_name}", file=sys.stderr)
+        print(f"Using endpoint: {url}", file=sys.stderr)
+
+        # Prepare headers - Remove x-apikey from headers
+        headers = {
+            "Content-Type": "application/json",
+            "x-apiKey": API_KEY,
+            "Cache-Control": "no-cache",
+        }
+
+        # # Set cookies with the API key as id_token (based on documentation)
+        # cookies = {"id_token": API_KEY}
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                json=row_data,
+                headers=headers,
+                params={"validate": str(validate).lower()},
+            )
+
+            # Debug: Print response details
+            print(f"Response status: {response.status_code}", file=sys.stderr)
+            print(f"Response headers: {response.headers}", file=sys.stderr)
+            print(f"Response content: {response.text}", file=sys.stderr)
+
+            # Successful creation returns 201
+            if response.status_code == 201:
+                try:
+                    response_data = response.json() if response.content else None
+                    return {"success": True, "data": response_data, "error": None}
+                except Exception as json_error:
+                    return {"success": True, "data": response.text, "error": None}
+
+            # For other status codes, try to get error details
+            try:
+                error_details = response.json() if response.content else response.text
+            except:
+                error_details = response.text
+
+            return {
+                "success": False,
+                "data": None,
+                "error": f"API returned {response.status_code}: {error_details}",
+            }
+
+    except KeyError:
+        return {
+            "success": False,
+            "data": None,
+            "error": f"Dataset '{dataset_name}' not found",
+        }
+    except Exception as e:
+        return {"success": False, "data": None, "error": f"Unexpected error: {str(e)}"}
+
+
 # Main entry point
 if __name__ == "__main__":
     print("Starting MCP server...", file=sys.stderr)
-    
+
     port = int(os.environ.get("PORT", 8000))
 
     mcp.run(
         transport="streamable-http",
-        host="0.0.0.0",    # Pour Cloud Run
+        host="0.0.0.0",  # Pour Cloud Run
         port=port,
-        path="/mcp"        # Chemin par défaut
+        path="/mcp",  # Chemin par défaut
+    )
+
+if __name__ == "__main__":
+    print("Starting MCP server...", file=sys.stderr)
+
+    port = int(os.environ.get("PORT", 8000))
+
+    mcp.run(
+        transport="streamable-http",
+        host="0.0.0.0",  # Pour Cloud Run
+        port=port,
+        path="/mcp",  # Chemin par défaut
     )
